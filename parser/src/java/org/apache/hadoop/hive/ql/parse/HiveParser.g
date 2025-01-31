@@ -25,7 +25,7 @@ backtrack=false;
 k=3;
 }
 
-import AlterClauseParser, SelectClauseParser, FromClauseParser, IdentifiersParser, ResourcePlanParser, CreateDDLParser, PrepareStatementParser;
+import AlterClauseParser, SelectClauseParser, FromClauseParser, IdentifiersParser, ResourcePlanParser, CreateDDLParser, PrepareStatementParser, ReplClauseParser, LockParser;
 
 tokens {
 TOK_INSERT;
@@ -219,6 +219,15 @@ TOK_ALTERTABLE_UPDATECOLUMNS;
 TOK_ALTERTABLE_OWNER;
 TOK_ALTERTABLE_SETPARTSPEC;
 TOK_ALTERTABLE_EXECUTE;
+TOK_ALTERTABLE_CREATE_BRANCH;
+TOK_ALTERTABLE_DROP_BRANCH;
+TOK_ALTERTABLE_RENAME_BRANCH;
+TOK_ALTERTABLE_CREATE_TAG;
+TOK_ALTERTABLE_DROP_TAG;
+TOK_ALTERTABLE_REPLACE_SNAPSHOTREF;
+TOK_RETAIN;
+TOK_WITH_SNAPSHOT_RETENTION;
+TOK_ALTERTABLE_CONVERT;
 TOK_MSCK;
 TOK_SHOWDATABASES;
 TOK_SHOWDATACONNECTORS;
@@ -254,11 +263,8 @@ TOK_TABLEROWFORMATLINES;
 TOK_TABLEROWFORMATNULL;
 TOK_TABLEFILEFORMAT;
 TOK_FILEFORMAT_GENERIC;
-TOK_OFFLINE;
 TOK_ENABLE;
 TOK_DISABLE;
-TOK_READONLY;
-TOK_NO_DROP;
 TOK_STORAGEHANDLER;
 TOK_NOT_CLUSTERED;
 TOK_NOT_SORTED;
@@ -431,6 +437,7 @@ TOK_ROLLBACK;
 TOK_SET_AUTOCOMMIT;
 TOK_CACHE_METADATA;
 TOK_ABORT_TRANSACTIONS;
+TOK_ABORT_COMPACTIONS;
 TOK_MERGE;
 TOK_MATCHED;
 TOK_NOT_MATCHED;
@@ -505,6 +512,9 @@ TOK_TRUNCATE;
 TOK_BUCKET;
 TOK_AS_OF_TIME;
 TOK_AS_OF_VERSION;
+TOK_FROM_VERSION;
+TOK_AS_OF_TAG;
+TOK_WRITE_LOCALLY_ORDERED;
 }
 
 
@@ -549,6 +559,8 @@ import org.apache.hadoop.hive.conf.HiveConf;
     xlateMap.put("KW_NULLS", "NULLS");
     xlateMap.put("KW_LAST", "LAST");
     xlateMap.put("KW_ORDER", "ORDER");
+    xlateMap.put("KW_ORDERED", "ORDERED");
+    xlateMap.put("KW_LOCALLY", "LOCALLY");
     xlateMap.put("KW_BY", "BY");
     xlateMap.put("KW_GROUP", "GROUP");
     xlateMap.put("KW_WHERE", "WHERE");
@@ -584,6 +596,7 @@ import org.apache.hadoop.hive.conf.HiveConf;
     xlateMap.put("KW_EXCEPT", "EXCEPT");
     xlateMap.put("KW_LOAD", "LOAD");
     xlateMap.put("KW_DATA", "DATA");
+    xlateMap.put("KW_OPTIMIZE", "OPTIMIZE");
     xlateMap.put("KW_INPATH", "INPATH");
     xlateMap.put("KW_IS", "IS");
     xlateMap.put("KW_NULL", "NULL");
@@ -696,7 +709,7 @@ import org.apache.hadoop.hive.conf.HiveConf;
     xlateMap.put("KW_DEFAULT", "DEFAULT");
     xlateMap.put("KW_CHECK", "CHECK");
     xlateMap.put("KW_POOL", "POOL");
-    xlateMap.put("KW_ID", "ID");
+    xlateMap.put("KW_COMPACT_ID", "COMPACTIONID");
     xlateMap.put("KW_MOVE", "MOVE");
     xlateMap.put("KW_DO", "DO");
     xlateMap.put("KW_ALLOC_FRACTION", "ALLOC_FRACTION");
@@ -964,13 +977,6 @@ loadStatement
     -> ^(TOK_LOAD $path $tab $islocal? $isoverwrite? inputFileFormat?)
     ;
 
-replicationClause
-@init { pushMsg("replication clause", state); }
-@after { popMsg(state); }
-    : KW_FOR (isMetadataOnly=KW_METADATA)? KW_REPLICATION LPAREN (replId=StringLiteral) RPAREN
-    -> ^(TOK_REPLICATION $replId $isMetadataOnly?)
-    ;
-
 exportStatement
 @init { pushMsg("export statement", state); }
 @after { popMsg(state); }
@@ -990,64 +996,6 @@ importStatement
          tableLocation?
     -> ^(TOK_IMPORT $path $tab? $ext? tableLocation?)
     ;
-
-replDumpStatement
-@init { pushMsg("Replication dump statement", state); }
-@after { popMsg(state); }
-      : KW_REPL KW_DUMP
-        (dbPolicy=replDbPolicy)
-        (KW_REPLACE oldDbPolicy=replDbPolicy)?
-        (KW_WITH replConf=replConfigs)?
-    -> ^(TOK_REPL_DUMP $dbPolicy ^(TOK_REPLACE $oldDbPolicy)? $replConf?)
-    ;
-
-replDbPolicy
-@init { pushMsg("Repl dump DB replication policy", state); }
-@after { popMsg(state); }
-    :
-      (dbName=identifier) (DOT tablePolicy=replTableLevelPolicy)? -> $dbName $tablePolicy?
-    ;
-
-replLoadStatement
-@init { pushMsg("Replication load statement", state); }
-@after { popMsg(state); }
-      : KW_REPL KW_LOAD
-      (sourceDbPolicy=replDbPolicy)
-      (KW_INTO dbName=identifier)?
-      (KW_WITH replConf=replConfigs)?
-      -> ^(TOK_REPL_LOAD $sourceDbPolicy ^(TOK_DBNAME $dbName)? $replConf?)
-      ;
-
-replConfigs
-@init { pushMsg("Repl configurations", state); }
-@after { popMsg(state); }
-    :
-      LPAREN replConfigsList RPAREN -> ^(TOK_REPL_CONFIG replConfigsList)
-    ;
-
-replConfigsList
-@init { pushMsg("Repl configurations list", state); }
-@after { popMsg(state); }
-    :
-      keyValueProperty (COMMA keyValueProperty)* -> ^(TOK_REPL_CONFIG_LIST keyValueProperty+)
-    ;
-
-replTableLevelPolicy
-@init { pushMsg("Replication table level policy definition", state); }
-@after { popMsg(state); }
-    :
-      ((replTablesIncludeList=StringLiteral) (DOT replTablesExcludeList=StringLiteral)?)
-      -> ^(TOK_REPL_TABLES $replTablesIncludeList $replTablesExcludeList?)
-    ;
-
-replStatusStatement
-@init { pushMsg("replication status statement", state); }
-@after { popMsg(state); }
-      : KW_REPL KW_STATUS
-        (dbName=identifier)
-        (KW_WITH replConf=replConfigs)?
-      -> ^(TOK_REPL_STATUS $dbName $replConf?)
-      ;
 
 ddlStatement
 @init { pushMsg("ddl statement", state); }
@@ -1075,10 +1023,7 @@ ddlStatement
     | reloadFunctionsStatement
     | dropMacroStatement
     | analyzeStatement
-    | lockStatement
-    | unlockStatement
-    | lockDatabase
-    | unlockDatabase
+    | lockStatements
     | createRoleStatement
     | dropRoleStatement
     | (grantPrivileges) => grantPrivileges
@@ -1092,6 +1037,7 @@ ddlStatement
     | setRole
     | showCurrentRole
     | abortTransactionStatement
+    | abortCompactionStatement
     | killQueryStatement
     | resourcePlanDdlStatements
     | createDataConnectorStatement
@@ -1340,7 +1286,7 @@ showStatement
       )
     | KW_SHOW KW_COMPACTIONS
       (
-      (KW_ID) => compactionId -> ^(TOK_SHOW_COMPACTIONS compactionId)
+      (KW_COMPACT_ID) => compactionId -> ^(TOK_SHOW_COMPACTIONS compactionId)
       |
       (KW_DATABASE|KW_SCHEMA) => (KW_DATABASE|KW_SCHEMA) (dbName=identifier) compactionPool? compactionType? compactionStatus? orderByClause? limitClause? -> ^(TOK_SHOW_COMPACTIONS $dbName compactionPool? compactionType? compactionStatus? orderByClause? limitClause?)
       |
@@ -1363,36 +1309,6 @@ showTablesFilterExpr
     -> ^(TOK_TABLE_TYPE identifier StringLiteral)
     | KW_LIKE showStmtIdentifier|showStmtIdentifier
     -> showStmtIdentifier
-    ;
-
-lockStatement
-@init { pushMsg("lock statement", state); }
-@after { popMsg(state); }
-    : KW_LOCK KW_TABLE tableName partitionSpec? lockMode -> ^(TOK_LOCKTABLE tableName lockMode partitionSpec?)
-    ;
-
-lockDatabase
-@init { pushMsg("lock database statement", state); }
-@after { popMsg(state); }
-    : KW_LOCK (KW_DATABASE|KW_SCHEMA) (dbName=identifier) lockMode -> ^(TOK_LOCKDB $dbName lockMode)
-    ;
-
-lockMode
-@init { pushMsg("lock mode", state); }
-@after { popMsg(state); }
-    : KW_SHARED | KW_EXCLUSIVE
-    ;
-
-unlockStatement
-@init { pushMsg("unlock statement", state); }
-@after { popMsg(state); }
-    : KW_UNLOCK KW_TABLE tableName partitionSpec?  -> ^(TOK_UNLOCKTABLE tableName partitionSpec?)
-    ;
-
-unlockDatabase
-@init { pushMsg("unlock database statement", state); }
-@after { popMsg(state); }
-    : KW_UNLOCK (KW_DATABASE|KW_SCHEMA) (dbName=identifier) -> ^(TOK_UNLOCKDB $dbName)
     ;
 
 createRoleStatement
@@ -1685,6 +1601,8 @@ viewPartition
 @after { popMsg(state); }
     : KW_PARTITIONED KW_ON LPAREN columnNameList RPAREN
     -> ^(TOK_VIEWPARTCOLS columnNameList)
+    | KW_PARTITIONED KW_ON KW_SPEC LPAREN (spec = partitionTransformSpec) RPAREN
+    -> ^(TOK_TABLEPARTCOLSBYSPEC $spec)
     ;
 
 viewOrganization
@@ -1917,6 +1835,22 @@ tableBuckets
     -> ^(TOK_ALTERTABLE_BUCKETS $bucketCols $sortCols? $num)
     ;
 
+tableImplBuckets
+@init { pushMsg("implicit table buckets specification", state); }
+@after { popMsg(state); }
+    :
+      KW_CLUSTERED KW_INTO num=Number KW_BUCKETS
+    -> ^(TOK_ALTERTABLE_BUCKETS $num)
+    ;
+
+tableWriteLocallyOrdered
+@init { pushMsg("table sorted specification", state); }
+@after { popMsg(state); }
+    :
+      KW_WRITE KW_LOCALLY KW_ORDERED KW_BY sortCols=columnNameOrderList
+    -> ^(TOK_WRITE_LOCALLY_ORDERED $sortCols?)
+    ;
+    
 tableSkewed
 @init { pushMsg("table skewed specification", state); }
 @after { popMsg(state); }
@@ -2278,6 +2212,8 @@ columnNameOrder
             ^(TOK_TABSORTCOLNAMEDESC ^(TOK_NULLS_LAST identifier))
     -> {$orderSpec.tree.getType()==HiveParser.KW_ASC}?
             ^(TOK_TABSORTCOLNAMEASC ^($nullSpec identifier))
+    -> {$orderSpec.tree.getType()==HiveParser.KW_DESC}?
+            ^(TOK_TABSORTCOLNAMEDESC ^($nullSpec identifier))
     -> ^(TOK_TABSORTCOLNAMEDESC ^($nullSpec identifier))
     ;
 
@@ -2479,9 +2415,7 @@ primitiveType
     | KW_DATETIME      ->    TOK_DATETIME
     | KW_TIMESTAMP     ->    TOK_TIMESTAMP
     | KW_TIMESTAMPLOCALTZ   ->    TOK_TIMESTAMPLOCALTZ
-    //| KW_TIMESTAMPTZ   ->    TOK_TIMESTAMPTZ
     | KW_TIMESTAMP KW_WITH KW_LOCAL KW_TIME KW_ZONE -> TOK_TIMESTAMPLOCALTZ
-    //| KW_TIMESTAMP KW_WITH KW_TIME KW_ZONE -> TOK_TIMESTAMPTZ
     // Uncomment to allow intervals as table column types
     //| KW_INTERVAL KW_YEAR KW_TO KW_MONTH -> TOK_INTERVAL_YEAR_MONTH
     //| KW_INTERVAL KW_DAY KW_TO KW_SECOND -> TOK_INTERVAL_DAY_TIME
@@ -2888,7 +2822,13 @@ abortTransactionStatement
   KW_ABORT KW_TRANSACTIONS ( Number )+ -> ^(TOK_ABORT_TRANSACTIONS ( Number )+)
   ;
 
+abortCompactionStatement
+@init { pushMsg("abort compactions statement", state); }
+@after { popMsg(state); }
+  :
 
+       KW_ABORT KW_COMPACTIONS ( Number )+ -> ^(TOK_ABORT_COMPACTIONS ( Number )+)
+  ;
 /*
 BEGIN SQL Merge statement
 */
@@ -2951,7 +2891,7 @@ killQueryStatement
 BEGIN SHOW COMPACTIONS statement
 */
 compactionId
-  : KW_ID EQUAL compactId=Number -> ^(TOK_COMPACT_ID $compactId)
+  : KW_COMPACT_ID EQUAL compactId=Number -> ^(TOK_COMPACT_ID $compactId)
   ;
 compactionPool
   : KW_POOL poolName=StringLiteral -> ^(TOK_COMPACT_POOL $poolName)

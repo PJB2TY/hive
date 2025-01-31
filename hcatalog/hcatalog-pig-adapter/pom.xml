@@ -22,7 +22,7 @@
   <parent>
     <groupId>org.apache.hive.hcatalog</groupId>
     <artifactId>hive-hcatalog</artifactId>
-    <version>4.0.0-SNAPSHOT</version>
+    <version>4.1.0-SNAPSHOT</version>
     <relativePath>../pom.xml</relativePath>
   </parent>
   <artifactId>hive-hcatalog-pig-adapter</artifactId>
@@ -94,6 +94,10 @@
           <artifactId>jasper-runtime</artifactId>
         </exclusion>
         <exclusion>
+          <groupId>org.apache.ivy</groupId>
+          <artifactId>ivy</artifactId>
+        </exclusion>
+        <exclusion>
           <groupId>tomcat</groupId>
           <artifactId>jasper-compiler</artifactId>
         </exclusion>
@@ -148,7 +152,7 @@
     <dependency>
       <groupId>org.apache.hive</groupId>
       <artifactId>hive-standalone-metastore-server</artifactId>
-      <version>4.0.0-SNAPSHOT</version>
+      <version>4.1.0-SNAPSHOT</version>
       <classifier>tests</classifier>
       <scope>test</scope>
     </dependency>

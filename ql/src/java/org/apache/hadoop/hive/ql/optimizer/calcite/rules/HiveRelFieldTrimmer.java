@@ -386,7 +386,7 @@ public class HiveRelFieldTrimmer extends RelFieldTrimmer {
 
 
   // Given a groupset this tries to find out if the cardinality of the grouping columns could have changed
-  // because if not and it consist of keys (unique + not null OR pk), we can safely remove rest of the columns
+  // because if not, and it consists of keys (unique + not null OR pk), we can safely remove rest of the columns
   // if those are columns are not being used further up
   private ImmutableBitSet generateGroupSetIfCardinalitySame(final Aggregate aggregate,
       final ImmutableBitSet originalGroupSet, final ImmutableBitSet fieldsUsed) {
@@ -502,28 +502,16 @@ public class HiveRelFieldTrimmer extends RelFieldTrimmer {
       return generateGroupSetIfCardinalitySame(aggregate, originalGroupSet, fieldsUsed);
     }
 
-    // we have set of unique key, get to the key which is same as group by key
-    ImmutableBitSet groupByUniqueKey = null;
-
+    // Find the maximum number of columns that can be removed by retaining a certain unique key
+    ImmutableBitSet columnsToRemove = ImmutableBitSet.of();
+    final ImmutableBitSet unusedGroupingColumns = aggregate.getGroupSet().except(fieldsUsed);
     for (ImmutableBitSet key : uniqueKeys) {
-      if (aggregate.getGroupSet().contains(key)) {
-        groupByUniqueKey = key;
-        break;
+      ImmutableBitSet removeCandidate = unusedGroupingColumns.except(key);
+      if (aggregate.getGroupSet().contains(key) && removeCandidate.cardinality() > columnsToRemove.cardinality()) {
+        columnsToRemove = removeCandidate;
       }
     }
-
-    if (groupByUniqueKey == null) {
-      // group by keys do not represent unique keys
-      return originalGroupSet;
-    }
-
-    // we know group by key contains primary key and there is at least one column in group by which is not being used
-    // if that column is not part of key it should be removed
-    ImmutableBitSet nonKeyColumns = aggregate.getGroupSet().except(groupByUniqueKey);
-    ImmutableBitSet columnsToRemove = nonKeyColumns.except(fieldsUsed);
-    ImmutableBitSet newGroupSet = aggregate.getGroupSet().except(columnsToRemove);
-
-    return  newGroupSet;
+    return aggregate.getGroupSet().except(columnsToRemove);
   }
 
   /**
